@@ -25,6 +25,9 @@ services:
       WIFI_RADIUS_DB: /var/lib/freeradius/radius.sqlite
       WIFI_CERT_HELPER: /usr/local/sbin/wifi-cert-issue
       WIFI_CA_DIR: /etc/freeradius/certs
+      # helper (wifi-cert-issue) の出力先。Bot 側の WIFI_CERT_ISSUED_DIR と
+      # ボリュームのマウント先 (/var/lib/wifi-bot/issued) に揃える
+      WIFI_ISSUED_DIR: /var/lib/wifi-bot/issued
       WIFI_CERT_ISSUED_DIR: /var/lib/wifi-bot/issued
       WIFI_SERIAL_DIR: /var/lib/wifi-certs
       # helper が p12 を chown する先 (コンテナの wifi-bot ユーザー)

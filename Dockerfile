@@ -1,23 +1,28 @@
 # Wi-Fi Discord Bot (wifi-bot)。FreeRADIUS 機上で Docker Compose で動かす。
+# - 本体は Go (discordgo) で multi-stage build で静的バイナリにする
 # - アカウントリング (SQLite) を読み取り専用で見る
 # - 証明書の発行は sudo で wifi-cert-issue (root) を呼ぶ (CA 秘密鍵は root のみが読める)
 # ユーザー/グループはホスト側の wifi-bot (uid) / freerad (gid) に合わせるため
 # build 時に ARG で固定する (compose.yml の .env から渡す)
-FROM python:3.13-slim
+FROM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/wifi-bot .
+
+FROM debian:bookworm-slim
 
 ARG WIFI_BOT_UID=999
 ARG WIFI_BOT_GID=999
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sudo openssl \
+    && apt-get install -y --no-install-recommends sudo openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # ホストの wifi-bot と同じ uid/gid でユーザーを作る (bind mount の権限を揃えるため)
 RUN groupadd -g "${WIFI_BOT_GID}" wifi-bot \
     && useradd -m -u "${WIFI_BOT_UID}" -g "${WIFI_BOT_GID}" wifi-bot
-
-COPY requirements.txt /opt/wifi-bot/requirements.txt
-RUN pip install --no-cache-dir -r /opt/wifi-bot/requirements.txt
 
 # 証明書発行 helper (root 専用)。コンテナ内の sudoers で wifi-bot ユーザーだけが
 # sudo -n で実行できる。ホスト側の sudoers は不要
@@ -31,8 +36,8 @@ RUN chmod 0755 /usr/local/sbin/wifi-cert-issue \
         >> /etc/sudoers.d/wifi-bot-certs \
     && chmod 0440 /etc/sudoers.d/wifi-bot-certs
 
-COPY bot.py /opt/wifi-bot/bot.py
+COPY --from=build /out/wifi-bot /usr/local/bin/wifi-bot
 
 USER wifi-bot
 WORKDIR /opt/wifi-bot
-CMD ["python", "bot.py"]
+CMD ["/usr/local/bin/wifi-bot"]

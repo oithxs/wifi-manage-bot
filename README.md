@@ -14,11 +14,16 @@
 ## 構成
 
 ```
-bot.py             Bot 本体 (discord.py)
+main.go            エントリポイント (Bot 本体は Go + discordgo)
+bot.go             スラッシュコマンドと Discord イベントハンドラ
+radius.go          アカウントリング (FreeRADIUS の SQLite) の読み取り
+authentik.go       Authentik API クライアント (発行の認可)
+cert.go            証明書の発行 (root helper の呼び出しと .mobileconfig 生成)
+config.go          環境変数の読み込み
+go.mod / go.sum    Go 依存 (モジュール: github.com/oithxs/wifi-manage-bot)
 wifi-cert-issue    証明書発行 helper (root 専用、設定は環境変数)
-Dockerfile         コンテナイメージ (python:3.13-slim + sudo + openssl)
+Dockerfile         コンテナイメージ (golang でビルド + debian:bookworm-slim で実行)
 compose.yml        実行環境 (FreeRADIUS 機上で動かす)
-requirements.txt   Python 依存
 .env.example       環境変数のひな形 (.env にコピーして使う。秘密なのでコミットしない)
 ```
 
@@ -54,7 +59,7 @@ iac 側 (`ansible/roles/radius`) は `radius_bot_repo_dir` 変数でこのディ
 
    ```sh
    docker compose down
-   docker compose up -d --build   # bot.py を変えたら --build で再ビルド
+   docker compose up -d --build   # .go ファイルを変えたら --build で再ビルド
    ```
 
 serial ディレクトリと issued ディレクトリはホストと共有する。helper は serial を
@@ -69,12 +74,19 @@ DB と CA だけ実物を参照する)。トークンを `.env` に書いて:
 docker compose up --build
 ```
 
-Bot の登録コマンド (`/wifi-cert`, `/access-log`) はギルド限定で `setup_hook` が
+Go ツールチェーンがあれば直接ビルド・実行もできる:
+
+```sh
+go build -o wifi-bot .   # 静的バイナリ (CGO 不要)
+./wifi-bot               # WIFI_* 環境変数 (.env は読まないので手動で export する)
+```
+
+Bot の登録コマンド (`/wifi-cert`, `/access-log`) はギルド限定で起動直後 (Ready) に
 同期する。トークンを替えて再起動すれば反映される。
 
 ## 設計メモ
 
-- **発行チャネル**: `bot.py` の `DEVICE_CHANNELS` (Apple 端末 → mobileconfig /
+- **発行チャネル**: `bot.go` の `deviceChannels` (Apple 端末 → mobileconfig /
   それ以外 → p12 / 両方)。helper はチャネルごとに別の鍵ペア・証明書を作り、
   `<username>/serial.mobileconfig` と `<username>/serial.p12` をそれぞれ上書きする。
   1 つの端末だけの再発行は他の端末の証明書に影響しない

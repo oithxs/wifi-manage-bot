@@ -1,0 +1,122 @@
+#!/bin/sh
+# Wi-Fi クライアント証明書の発行 (root 専用)。wifi-bot が sudo -n で呼び出す。
+# CA 秘密鍵は root (コンテナ内ではコンテナの root) のみが読める。
+# 誰に発行してよいか (Discord 連携済み + 部員トークン) の判定は Bot 側 (Authentik) で行う。
+# 1 回の呼び出しで 2 つのチャネル (mobileconfig = Apple 端末用プロファイル / p12 = それ以外)
+# に別々の証明書を発行する。失効はチャネルごとに独立
+# (serial.mobileconfig / serial.p12 を再発行のたびに上書きし、そのチャネルの
+# 以前の証明書だけが FreeRADIUS 側の wifi-cert-check で拒否される。もう片方のチャネルには影響しない)。
+# stdout に行ごとに JSON {"channel": ..., "file": p12 のパス, "password": ..., "cn": CN} を出す
+#
+# 設定は環境変数 (ホストに直置きするときも Docker Compose でも同じ):
+#   WIFI_CA_DIR           CA 証明書/秘密鍵 (ca.crt, ca.key) のディレクトリ
+#   WIFI_ISSUED_DIR       発行した p12 を置くディレクトリ (Bot が読んで消す)
+#   WIFI_ISSUE_UID/GID    p12 ファイルの chown 先 (Bot を動かすユーザーの uid/gid)
+#   WIFI_CERT_DAYS        証明書の有効日数
+#   WIFI_SERIAL_DIR       serial を記録するディレクトリ (<username>/serial.<channel>)
+#   WIFI_P12_PASSWORDLESS 1 なら p12 を暗号化しない (パスワードなし)。0 ならランダム英数字 20 文字
+set -eu
+umask 077
+
+CA_DIR="${WIFI_CA_DIR:-/etc/freeradius/3.0/certs}"
+OUT_DIR="${WIFI_ISSUED_DIR:-/opt/wifi-bot/issued}"
+ISSUE_UID="${WIFI_ISSUE_UID:-999}"
+ISSUE_GID="${WIFI_ISSUE_GID:-999}"
+DAYS="${WIFI_CERT_DAYS:-365}"
+# 現在有効な証明書の serial を記録する場所 (再発行のたびに上書き = 以前の証明書を無効化)
+SERIAL_DIR="${WIFI_SERIAL_DIR:-/var/lib/wifi-certs}"
+# 1 なら p12 を暗号化せず (パスワードなし) 出力する。0 ならランダム英数字 20 文字で暗号化
+PASSWORDLESS="${WIFI_P12_PASSWORDLESS:-0}"
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "usage: wifi-cert-issue <username> [mobileconfig|p12|both]" >&2
+    exit 2
+fi
+user="$1"
+# 発行するチャネル。省略時は両方 (mobileconfig = Apple 端末用プロファイルに埋め込む証明書 /
+# p12 = それ以外の OS 用)。失効 (serial 記録) はチャネルごとに独立なので、
+# Bot は端末種別に応じて 1 つのチャネルだけを再発行させられる
+case "${2:-both}" in
+    mobileconfig | p12 | both) channels="${2:-both}" ;;
+    *) echo "invalid channel: $2" >&2; exit 2 ;;
+esac
+# username の文字種 (FreeRADIUS 側の部員管理と一致)
+case "$user" in
+    *[!a-z0-9._-]*) echo "invalid username: $user" >&2; exit 2 ;;
+    "") echo "invalid username: (empty)" >&2; exit 2 ;;
+esac
+name="wifi-$user"
+
+if [ ! -f "$CA_DIR/ca.key" ] || [ ! -f "$CA_DIR/ca.crt" ]; then
+    echo "client CA is missing in $CA_DIR (WIFI_CA_DIR に ca.crt と ca.key を置いてください)" >&2
+    exit 2
+fi
+
+# チャネルごとに鍵ペアと証明書を作る。サブシェルにして EXIT trap を分離する
+issue() (
+    set -eu
+    umask 077
+    channel="$1"
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+
+    # p12 のパスワード。PASSWORDLESS=1 なら無暗号化 (端末でパスワード入力が不要)。
+    # -certpbe/-keypbe NONE で証明書・秘密鍵とも暗号化しない (OpenSSL 3 の -noenc は
+    # export では無視されるため NONE を使う)。空文字パスワード (-passout "pass:") は
+    # 「空パスワードによる暗号化」になって別物なので注意
+    if [ "$PASSWORDLESS" = "1" ]; then
+        password=""
+        enc_args="-certpbe NONE -keypbe NONE -passout pass:"
+    else
+        # 英数字 20 文字 (端末のキーボードで打ちやすい文字にする)
+        password="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+        enc_args="-passout pass:$password"
+    fi
+
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/key.pem"
+    openssl req -new -key "$work/key.pem" \
+        -subj "/O=hxs clubroom Wi-Fi/CN=$name" -out "$work/csr.pem"
+    # CA ディレクトリは読み取り専用 (コンテナでは ro マウント) のため、
+    # openssl が管理する serial ファイル (ca.srl) は作業ディレクトリに置く。
+    # -CAcreateserial はファイルが無いときランダムな serial を生成する
+    openssl x509 -req -sha256 -in "$work/csr.pem" \
+        -CA "$CA_DIR/ca.crt" -CAkey "$CA_DIR/ca.key" \
+        -CAserial "$work/ca.srl" -CAcreateserial \
+        -days "$DAYS" -out "$work/cert.pem"
+    # p12 には部員 CA の証明書も入れる (端末が CA を手動で信頼しなくて済む)
+    # enc_args は PASSWORDLESS=1 で "-certpbe NONE -keypbe NONE" (無暗号化)、
+    # そうでなければ "-passout pass:<password>"
+    openssl pkcs12 -export \
+        -inkey "$work/key.pem" -in "$work/cert.pem" -certfile "$CA_DIR/ca.crt" \
+        -name "$name" $enc_args -out "$work/out.p12"
+
+    out="$OUT_DIR/$name-$(date +%Y%m%d%H%M%S)-$channel.p12"
+    mv "$work/out.p12" "$out"
+    chown "$ISSUE_UID:$ISSUE_GID" "$out"
+    chmod 0600 "$out"
+
+    # 現在有効な証明書の serial をチャネルごとに記録する。再発行のたびに
+    # 上書きされるため、そのチャネルで以前に発行した証明書は check-eap-tls
+    # (wifi-cert-check) で拒否される。チャネルが違えば影響しない
+    serial="$(openssl x509 -in "$work/cert.pem" -noout -serial | cut -d= -f2)"
+    mkdir -p "$SERIAL_DIR/$user"
+    printf '%s\n' "$serial" > "$SERIAL_DIR/$user/serial.$channel"
+    chmod 0755 "$SERIAL_DIR/$user"
+    chmod 0644 "$SERIAL_DIR/$user/serial.$channel"
+
+    printf '{"channel":"%s","file":"%s","password":"%s","cn":"%s"}\n' "$channel" "$out" "$password" "$name"
+)
+
+case "$channels" in
+    mobileconfig) issue mobileconfig ;;
+    p12) issue p12 ;;
+    both) issue mobileconfig; issue p12 ;;
+esac
+
+# 単一証明書時代の serial ファイルは「旧い p12 チャネルの証明書」とみなす
+# (mobileconfig の配布開始以前に発行された証明書はすべて p12 / 手動インポートだったため)。
+# p12 チャネルを発行したら消す (その時点で旧証明書は無効)。mobileconfig だけの
+# 発行では残す (旧い端末の証明書を生かしておくため)
+if [ "$channels" != "mobileconfig" ]; then
+    rm -f "$SERIAL_DIR/$user/serial"
+fi

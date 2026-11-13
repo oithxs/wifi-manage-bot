@@ -1,8 +1,8 @@
-// Discord (discordgo) のイベントハンドラとスラッシュコマンド。
+// Discord (discordgo) の実装。スラッシュコマンドの定義とイベントの Dispatch、
+// 共通の認可ゲート。コマンドごとの処理は commands.go。
 package main
 
 import (
-	"bytes"
 	"database/sql"
 	"fmt"
 	"log"
@@ -21,21 +21,66 @@ var deviceChannels = map[string][]string{
 
 var defaultDevice = "Apple 端末 (iPhone / iPad / Mac)"
 
+var defaultChannels = deviceChannels[defaultDevice]
+
+// チャネル → 表示名 (/show と再発行ボタンのメッセージで使う)
+var channelLabels = map[string]string{
+	"mobileconfig": "iOS / iPadOS / macOS",
+	"p12":          "Android / Windows など",
+}
+
+func deviceLabel(channels []string) string {
+	switch {
+	case len(channels) == 1 && channels[0] == "mobileconfig":
+		return "Apple 端末 (iPhone / iPad / Mac)"
+	case len(channels) == 1 && channels[0] == "p12":
+		return "Android / Windows など"
+	default:
+		return "両方 (全端末で入れ直す)"
+	}
+}
+
+func deviceOption(description string) *discordgo.ApplicationCommandOption {
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(deviceChannels))
+	for name := range deviceChannels {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: name, Value: name})
+	}
+	return &discordgo.ApplicationCommandOption{
+		Type:        discordgo.ApplicationCommandOptionString,
+		Name:        "device",
+		Description: description,
+		Required:    false,
+		Choices:     choices,
+	}
+}
+
+// 再発行ボタンの CustomID (クリックされたとき channels を取り出す)
+func reissueCustomID(channels []string) string {
+	return "reissue:" + strings.Join(channels, ",")
+}
+
 var commands = []*discordgo.ApplicationCommand{
 	{
-		Name:        "wifi-cert",
-		Description: "自分の Wi-Fi クライアント証明書を発行して送る (本人にしか見えない)",
-		Options: []*discordgo.ApplicationCommandOption{{
-			Type:        discordgo.ApplicationCommandOptionString,
-			Name:        "device",
-			Description: "証明書を使う端末。有効期限が切れたときはその端末だけ選べば、他の端末の証明書は無効になりません",
-			Required:    false,
-			Choices: []*discordgo.ApplicationCommandOptionChoice{
-				{Name: "Apple 端末 (iPhone / iPad / Mac)", Value: "Apple 端末 (iPhone / iPad / Mac)"},
-				{Name: "Android / Windows など", Value: "Android / Windows など"},
-				{Name: "両方 (全端末で入れ直す)", Value: "両方 (全端末で入れ直す)"},
-			},
-		}},
+		Name:        "connect",
+		Description: "Authentik との Discord 連携状況を確認し、未連携なら連携する",
+	},
+	{
+		Name:        "issue",
+		Description: "Wi-Fi クライアント証明書を新しく発行して送る (本人にしか見えない)",
+		Options: []*discordgo.ApplicationCommandOption{
+			deviceOption("証明書を使う端末。有効期限が切れたときは /reissue でその端末だけ選べば、他の端末の証明書は無効になりません"),
+		},
+	},
+	{
+		Name:        "show",
+		Description: "現在有効な自分の Wi-Fi クライアント証明書を表示する",
+	},
+	{
+		Name:        "reissue",
+		Description: "Wi-Fi クライアント証明書を再発行する (以前の証明書は破棄されます)",
+		Options: []*discordgo.ApplicationCommandOption{
+			deviceOption("再発行する証明書の端末。選んだ端末の証明書だけが新しくなり、他の端末の証明書は変わりません"),
+		},
 	},
 	{
 		Name:        "access-log",
@@ -101,15 +146,64 @@ func (b *bot) onReady(s *discordgo.Session, _ *discordgo.Ready) {
 }
 
 func (b *bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
-		return
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand:
+		switch i.ApplicationCommandData().Name {
+		case "connect":
+			b.handleConnect(s, i)
+		case "issue":
+			b.handleIssue(s, i)
+		case "show":
+			b.handleShow(s, i)
+		case "reissue":
+			b.handleReissue(s, i)
+		case "access-log":
+			b.handleAccessLog(s, i)
+		}
+	case discordgo.InteractionMessageComponent:
+		// 証明書メッセージの「再発行」ボタン
+		b.onReissueButton(s, i)
 	}
-	switch i.ApplicationCommandData().Name {
-	case "wifi-cert":
-		b.handleWifiCert(s, i)
-	case "access-log":
-		b.handleAccessLog(s, i)
+}
+
+// linked は Authentik との連携だけを確認するゲート (/show・/connect 用)。
+// 未連携なら誘導メッセージを送って false を返す
+func (b *bot) linked(s *discordgo.Session, i *discordgo.InteractionCreate) (string, bool) {
+	if b.cfg.authentikURL == "" || b.cfg.authentikToken == "" {
+		b.followError(s, i, "この Bot は Authentik と連携されていません。管理者に連絡してください。")
+		return "", false
 	}
+	username, err := b.authentik.usernameForDiscord(interactionUser(i).ID)
+	if err != nil {
+		b.followError(s, i, "Authentik に接続できませんでした: "+errReason(err))
+		return "", false
+	}
+	if username == "" {
+		sendConnectPrompt(b.cfg, s, i)
+		return "", false
+	}
+	return username, true
+}
+
+// authorize は発行の認可ゲート (Discord 連携済み + 部員トークン wifi-<username>)。
+// 通らなければ理由のメッセージを送って false を返す
+func (b *bot) authorize(s *discordgo.Session, i *discordgo.InteractionCreate) (string, bool) {
+	username, ok := b.linked(s, i)
+	if !ok {
+		return "", false
+	}
+	password, err := b.authentik.wifiPassword(username)
+	if err != nil {
+		b.followError(s, i, "Authentik に接続できませんでした: "+errReason(err))
+		return "", false
+	}
+	if password == "" {
+		b.followError(s, i,
+			"まだ部員登録が済んでいません (Wi-Fi 用トークンがありません)。"+
+				"管理者が roles/radius の play を実行するまでお待ちください。")
+		return "", false
+	}
+	return username, true
 }
 
 func sendConnectPrompt(cfg *config, s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -129,170 +223,4 @@ func sendConnectPrompt(cfg *config, s *discordgo.Session, i *discordgo.Interacti
 			},
 		},
 	})
-}
-
-func (b *bot) handleWifiCert(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	deferEphemeral(s, i)
-	if b.cfg.authentikURL == "" || b.cfg.authentikToken == "" {
-		b.followError(s, i, "この Bot は Authentik と連携されていません。管理者に連絡してください。")
-		return
-	}
-	device := defaultDevice
-	for _, option := range i.ApplicationCommandData().Options {
-		if option.Name == "device" {
-			device = option.StringValue()
-		}
-	}
-	channels, ok := deviceChannels[device]
-	if !ok {
-		channels = deviceChannels[defaultDevice]
-	}
-	discordID := interactionUser(i).ID
-	username, err := b.authentik.usernameForDiscord(discordID)
-	if err != nil {
-		b.followError(s, i, "Authentik に接続できませんでした: "+errReason(err))
-		return
-	}
-	if username == "" {
-		sendConnectPrompt(b.cfg, s, i)
-		return
-	}
-	password, err := b.authentik.wifiPassword(username)
-	if err != nil {
-		b.followError(s, i, "Authentik に接続できませんでした: "+errReason(err))
-		return
-	}
-	if password == "" {
-		b.followError(s, i,
-			"まだ部員登録が済んでいません (Wi-Fi 用トークンがありません)。"+
-				"管理者が roles/radius の play を実行するまでお待ちください。")
-		return
-	}
-	// 発行の認可はここまでの判定 (Discord 連携済み + 部員トークン) で済んでいる。
-	// 選ばれた端末種別のチャネルだけを発行する。チャネルごとに別の証明書・別の失効
-	// (serial 記録) なので、1 つの端末の再発行は他の端末の証明書に影響しない
-	issued, err := issueCertificate(b.cfg, username, channels)
-	if err != nil {
-		b.followError(s, i, "証明書を発行できませんでした: "+err.Error())
-		return
-	}
-	var files []*discordgo.File
-	var notes strings.Builder
-	if item, ok := issued["mobileconfig"]; ok {
-		mcData, err := readFileOnce(item.File)
-		if err != nil {
-			b.followError(s, i, "証明書ファイルを読めませんでした: "+err.Error())
-			return
-		}
-		// Apple 端末用は Wi-Fi 設定込みのプロファイル。パスワードもプロファイルに入るので
-		// 端末側で入力する必要がない
-		mc, err := buildMobileconfig(b.cfg, username, mcData, item.Password)
-		if err != nil {
-			b.followError(s, i, "プロファイルを作れませんでした: "+err.Error())
-			return
-		}
-		files = append(files, &discordgo.File{
-			Name:        fmt.Sprintf("wifi-%s.mobileconfig", username),
-			ContentType: "application/x-apple-aspen-config",
-			Reader:      bytes.NewReader(mc),
-		})
-		notes.WriteString("- **iOS / iPadOS / macOS**: `.mobileconfig` を Safari で開いてプロファイルをインストールしてください (パスワード入力不要、Wi-Fi 設定も済みます)。\n")
-	}
-	if item, ok := issued["p12"]; ok {
-		p12Data, err := readFileOnce(item.File)
-		if err != nil {
-			b.followError(s, i, "証明書ファイルを読めませんでした: "+err.Error())
-			return
-		}
-		files = append(files, &discordgo.File{
-			Name:        fmt.Sprintf("wifi-%s.p12", username),
-			ContentType: "application/x-pkcs12",
-			Reader:      bytes.NewReader(p12Data),
-		})
-		if item.Password != "" {
-			fmt.Fprintf(&notes, "- **Android / Windows など**: `.p12` をインポートしてください。パスワード: `%s`\n", item.Password)
-		} else {
-			notes.WriteString("- **Android / Windows など**: `.p12` をインポートしてください (そのまま使えます、パスワードは不要です)。\n")
-		}
-	}
-	followEphemeral(s, i, &discordgo.WebhookParams{
-		Content: fmt.Sprintf(
-			"Wi-Fi クライアント証明書 (CN: `%s`) を発行しました (%s)。\n"+
-				"1 年で有効期限が切れます。切れたら**同じ端末を選んで**もう一度 /wifi-cert を実行してください "+
-				"(端末ごとに証明書が別なので、1 つの端末だけの再発行は他の端末に影響しません)。\n",
-			issued[channels[0]].CN, device,
-		) + notes.String(),
-		Files: files,
-	})
-}
-
-func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	deferEphemeral(s, i)
-	connected, last, err := accessLogData(b.db)
-	if err != nil {
-		b.followError(s, i, "アカウントリング DB を読めませんでした: "+err.Error())
-		return
-	}
-	// 氏名と連携状況 (username → 氏名/Discord ID) を取る。Authentik が落ちても username だけは出す
-	usernames := make([]string, 0, len(connected)+1)
-	for _, row := range connected {
-		usernames = append(usernames, row.username)
-	}
-	if last != nil && !contains(usernames, last.username) {
-		usernames = append(usernames, last.username)
-	}
-	info := map[string]userInfoEntry{}
-	if b.cfg.authentikURL != "" && b.cfg.authentikToken != "" {
-		if entries, err := b.authentik.userInfo(usernames); err == nil {
-			info = entries
-		}
-	}
-	who := func(username string) string {
-		entry, ok := info[username]
-		name := username
-		if ok && entry.name != "" {
-			name = entry.name
-		}
-		var parts []string
-		if ok && entry.discordID != "" {
-			parts = append(parts, "<@"+entry.discordID+">")
-		}
-		if name != username {
-			parts = append(parts, name)
-		}
-		parts = append(parts, "`"+username+"`")
-		if !(ok && entry.discordID != "") {
-			parts = append(parts, "未連携")
-		}
-		return strings.Join(parts, " ")
-	}
-	lines := make([]string, 0, len(connected))
-	for _, row := range connected {
-		lines = append(lines, fmt.Sprintf("- %s — %s から", who(row.username), fmtTime(row.started)))
-	}
-	text := "Wi-Fi に接続している部員はいません。"
-	if len(lines) > 0 {
-		text = fmt.Sprintf("Wi-Fi に接続中 (%d 名):\n%s", len(lines), strings.Join(lines, "\n"))
-	}
-	if last != nil {
-		if last.stopped == nil {
-			text += fmt.Sprintf("\n\n最後の利用: %s — %s から接続中", who(last.username), fmtTime(last.started))
-		} else {
-			text += fmt.Sprintf("\n\n最後の利用: %s — %s 〜 %s", who(last.username), fmtTime(last.started), fmtTime(last.stopped))
-		}
-	}
-	// メンションは表示にだけ使い、通知は飛ばさない
-	followEphemeral(s, i, &discordgo.WebhookParams{
-		Content:         text,
-		AllowedMentions: &discordgo.MessageAllowedMentions{},
-	})
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }

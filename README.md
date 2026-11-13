@@ -1,12 +1,18 @@
 # wifi-bot
 
-部室 Wi-Fi (802.1X / EAP-TLS) の Discord Bot。次の 2 つのスラッシュコマンドを提供する:
+部室 Wi-Fi (802.1X / EAP-TLS) の Discord Bot。次のスラッシュコマンドを提供する:
 
+- **`/connect`**: Authentik との Discord 連携状況を確認し、未連携なら連携ボタンを出す
+- **`/issue`**: Wi-Fi クライアント証明書を新しく発行して送る。Apple 端末
+  (iOS / iPadOS / macOS) には Wi-Fi 設定込みの `.mobileconfig`、それ以外の OS には
+  `.p12` とパスワード。メッセージに**再発行ボタン**つき
+  (ボタンで再発行すると、そのメッセージの証明書は破棄される)
+- **`/show`**: 現在有効な自分の証明書 (serial・発行日時・有効期限の目安) を表示する
+- **`/reissue`**: 証明書を再発行する。**再発行すると以前の証明書は破棄される**
+  (serial の上書きで失効)。端末種別ごとに**別の証明書**なので、1 つの端末だけの
+  再発行は他の端末に影響しない
 - **`/access-log`**: 現在 Wi-Fi に接続している部員の一覧と、最後の利用。FreeRADIUS が
   SQLite に書くアカウントリング (Accounting) を読む
-- **`/wifi-cert`**: 実行者本人の Wi-Fi クライアント証明書を発行して送る。Apple 端末
-  (iOS / iPadOS / macOS) には Wi-Fi 設定込みの `.mobileconfig`、それ以外の OS には
-  `.p12` とパスワード。端末種別ごとに**別の証明書**を発行し、失効 (再発行) も端末種別ごとに独立
 
 発行の認可は Authentik (Discord 連携済み + 部員トークン `wifi-<username>` の存在)、
 署名は同梱の root helper (`wifi-cert-issue`) がローカル CA で行う。

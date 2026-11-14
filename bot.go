@@ -124,11 +124,55 @@ func (b *bot) followError(s *discordgo.Session, i *discordgo.InteractionCreate, 
 	followEphemeral(s, i, &discordgo.WebhookParams{Content: content})
 }
 
+// deleteStaleCommands は現行のコマンド一覧 (commands) にない Discord 上の
+// コマンド登録を消す。ApplicationCommandCreate は一覧にないコマンドを残すため、
+// 古いバージョンの Bot (Python 版) が登録した /wifi-cert 等がギルドに残り続ける。
+// ギルドスコープは現行一覧にない名前だけを削除し、グローバルスコープは
+// ギルド限定運用なので全部削除する
+func (b *bot) deleteStaleCommands(s *discordgo.Session) {
+	current := make(map[string]bool, len(commands))
+	for _, cmd := range commands {
+		current[cmd.Name] = true
+	}
+	// ギルドスコープ
+	guild, err := s.ApplicationCommands(s.State.User.ID, b.cfg.guildID)
+	if err != nil {
+		log.Printf("failed to list guild commands: %v", err)
+	} else {
+		for _, cmd := range guild {
+			if current[cmd.Name] {
+				continue
+			}
+			if err := s.ApplicationCommandDelete(s.State.User.ID, b.cfg.guildID, cmd.ID); err != nil {
+				log.Printf("failed to delete stale /%s: %v", cmd.Name, err)
+			} else {
+				log.Printf("deleted stale guild command /%s", cmd.Name)
+			}
+		}
+	}
+	// グローバルスコープ (この Bot はギルド限定で登録するので全消し)
+	global, err := s.ApplicationCommands(s.State.User.ID, "")
+	if err != nil {
+		log.Printf("failed to list global commands: %v", err)
+		return
+	}
+	for _, cmd := range global {
+		if err := s.ApplicationCommandDelete(s.State.User.ID, "", cmd.ID); err != nil {
+			log.Printf("failed to delete global /%s: %v", cmd.Name, err)
+		} else {
+			log.Printf("deleted global command /%s", cmd.Name)
+		}
+	}
+}
+
 func (b *bot) onReady(s *discordgo.Session, _ *discordgo.Ready) {
 	// ギルド限定で登録する (グローバル登録は反映に最大1時間かかるため)
 	if b.registered {
 		return
 	}
+	// 古いバージョンが登録したまま残っているコマンド (/wifi-cert 等) を消してから登録する。
+	// ApplicationCommandCreate は追加 (上書き) だけで、一覧から外れたコマンドは残る
+	b.deleteStaleCommands(s)
 	var firstErr error
 	for _, cmd := range commands {
 		if _, err := s.ApplicationCommandCreate(s.State.User.ID, b.cfg.guildID, cmd); err != nil {

@@ -107,6 +107,9 @@ func followEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, param
 }
 
 func (b *bot) followError(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	// エラーは ephemeral にしか出ないので、docker logs でも原因を追えるように記録する
+	u := interactionUser(i)
+	log.Printf("error for %s (id %s): %s", u.Username, u.ID, content)
 	followEphemeral(s, i, &discordgo.WebhookParams{Content: content})
 }
 
@@ -207,6 +210,8 @@ func (b *bot) linked(s *discordgo.Session, i *discordgo.InteractionCreate) (stri
 		return "", false
 	}
 	if username == "" {
+		log.Printf("not linked: discord user %s (id %s) has no authentik connection",
+			interactionUser(i).Username, interactionUser(i).ID)
 		sendConnectPrompt(b.cfg, s, i)
 		return "", false
 	}
@@ -226,6 +231,7 @@ func (b *bot) authorize(s *discordgo.Session, i *discordgo.InteractionCreate) (s
 		return "", false
 	}
 	if password == "" {
+		log.Printf("no wifi token: %s (discord id %s) is not a registered member", username, interactionUser(i).ID)
 		b.followError(s, i,
 			"まだ部員登録が済んでいません (Wi-Fi 用トークンがありません)。"+
 				"管理者が roles/radius の play を実行するまでお待ちください。")

@@ -26,7 +26,6 @@ func (e *apiError) Error() string {
 }
 
 type userInfoEntry struct {
-	name      string
 	discordID string
 }
 
@@ -90,15 +89,24 @@ func (c *authentikClient) list(path string, params map[string]string) ([]map[str
 				results = append(results, entry)
 			}
 		}
+		// Authentik の Pagination は next が「次のページ番号」で、最終ページでは 0 になる
+		// (キーは常に存在する)。キーの存在だけで判断すると、存在しないページ 2 を
+		// 取りに行って 404 になり、これまでに取れた結果が全部捨てられてしまう
 		pagination, _ := data["pagination"].(map[string]any)
-		if _, ok := pagination["next"]; !ok {
+		switch next := pagination["next"].(type) {
+		case float64:
+			if next == 0 {
+				return results, nil
+			}
+		case nil:
+			// next が無い (または null) のも最終ページ扱い
 			return results, nil
 		}
 	}
 }
 
 func (c *authentikClient) userInfo(usernames []string) (map[string]userInfoEntry, error) {
-	// Authentik username → {"name": 氏名, "discord_id": 連携していれば Discord ID}
+	// Authentik username → 連携していれば Discord ID。
 	//
 	// 連携していない部員は discord_id が空文字になる。Authentik が落ちたときはエラーを返す
 	// (呼び出し側が username だけの表示にフォールバックする)
@@ -116,11 +124,7 @@ func (c *authentikClient) userInfo(usernames []string) (map[string]userInfoEntry
 		pk := fmt.Sprint(user["pk"])
 		username, _ := user["username"].(string)
 		pkToUsername[pk] = username
-		entry := userInfoEntry{name: username}
-		if name, ok := user["name"].(string); ok && name != "" {
-			entry.name = name
-		}
-		info[username] = entry
+		info[username] = userInfoEntry{}
 	}
 	connections, err := c.list(
 		"/api/v3/sources/user_connections/oauth/",

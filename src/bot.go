@@ -23,12 +23,6 @@ var defaultDevice = "Apple 端末 (iPhone / iPad / Mac)"
 
 var defaultChannels = deviceChannels[defaultDevice]
 
-// チャネル → 表示名 (/show と再発行ボタンのメッセージで使う)
-var channelLabels = map[string]string{
-	"mobileconfig": "iOS / iPadOS / macOS",
-	"p12":          "Android / Windows など",
-}
-
 func deviceLabel(channels []string) string {
 	switch {
 	case len(channels) == 1 && channels[0] == "mobileconfig":
@@ -70,10 +64,6 @@ var commands = []*discordgo.ApplicationCommand{
 		Options: []*discordgo.ApplicationCommandOption{
 			deviceOption("証明書を使う端末。有効期限が切れたときは /reissue でその端末だけ選べば、他の端末の証明書は無効になりません"),
 		},
-	},
-	{
-		Name:        "show",
-		Description: "現在有効な自分の Wi-Fi クライアント証明書を表示する",
 	},
 	{
 		Name:        "reissue",
@@ -197,8 +187,6 @@ func (b *bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 			b.handleConnect(s, i)
 		case "issue":
 			b.handleIssue(s, i)
-		case "show":
-			b.handleShow(s, i)
 		case "reissue":
 			b.handleReissue(s, i)
 		case "access-log":
@@ -210,7 +198,7 @@ func (b *bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 }
 
-// linked は Authentik との連携だけを確認するゲート (/show・/connect 用)。
+// linked は Authentik との連携だけを確認するゲート (/connect 用)。
 // 未連携なら誘導メッセージを送って false を返す
 func (b *bot) linked(s *discordgo.Session, i *discordgo.InteractionCreate) (string, bool) {
 	if b.cfg.authentikURL == "" || b.cfg.authentikToken == "" {

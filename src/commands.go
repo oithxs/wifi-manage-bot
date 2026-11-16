@@ -1,4 +1,4 @@
-// スラッシュコマンド (/connect /issue /show /reissue /access-log) と
+// スラッシュコマンド (/connect /issue /reissue /access-log) と
 // 証明書メッセージの「再発行」ボタンの実装。
 package main
 
@@ -213,44 +213,6 @@ func (b *bot) markReissued(s *discordgo.Session, i *discordgo.InteractionCreate,
 	}
 }
 
-// --- /show: 発行済み (現在有効な) 証明書の表示 ---
-
-func (b *bot) handleShow(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	deferEphemeral(s, i)
-	// serial の記録は連携されていれば username 単位で読めるので、部員トークンは要求しない
-	// (部員でなければそもそも serial の記録がない)
-	username, ok := b.linked(s, i)
-	if !ok {
-		return
-	}
-	certs, err := issuedCertificates(b.cfg, username)
-	if err != nil {
-		b.followError(s, i, "証明書の記録を読めませんでした: "+err.Error())
-		return
-	}
-	var content string
-	if len(certs) == 0 {
-		content = fmt.Sprintf("`%s` の現在有効な Wi-Fi クライアント証明書はありません。`/issue` で発行してください。", username)
-	} else {
-		var text strings.Builder
-		fmt.Fprintf(&text, "`%s` の現在有効な Wi-Fi クライアント証明書:\n", username)
-		for _, cert := range certs {
-			name := channelLabels[cert.Channel]
-			if cert.Legacy {
-				name += " (旧形式)"
-			}
-			fmt.Fprintf(&text, "- **%s**: serial `%s`、発行 %s、有効期限 %s (目安)\n",
-				name, cert.Serial,
-				cert.IssuedAt.In(jst).Format("2006-01-02 15:04"),
-				cert.ExpiresAt.In(jst).Format("2006-01-02"))
-		}
-		text.WriteString("\n再発行するには `/reissue` を実行するか、証明書メッセージの「再発行」ボタンを押してください。" +
-			"**再発行すると表示中の証明書は破棄されます** (以前の証明書は失効し、接続できなくなります)。")
-		content = text.String()
-	}
-	followEphemeral(s, i, &discordgo.WebhookParams{Content: content})
-}
-
 // --- /access-log: 接続中の部員一覧 ---
 
 func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -260,7 +222,7 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 		b.followError(s, i, "アカウントリング DB を読めませんでした: "+err.Error())
 		return
 	}
-	// 氏名と連携状況 (username → 氏名/Discord ID) を取る。Authentik が落ちても username だけは出す
+	// 連携状況 (username → Discord ID) を取る。Authentik が落ちても username だけは出す
 	usernames := make([]string, 0, len(connected)+1)
 	for _, row := range connected {
 		usernames = append(usernames, row.username)
@@ -269,29 +231,20 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 		usernames = append(usernames, last.username)
 	}
 	info := map[string]userInfoEntry{}
+	var infoErr error
 	if b.cfg.authentikURL != "" && b.cfg.authentikToken != "" {
 		if entries, err := b.authentik.userInfo(usernames); err == nil {
 			info = entries
+		} else {
+			infoErr = err
 		}
 	}
 	who := func(username string) string {
-		entry, ok := info[username]
-		name := username
-		if ok && entry.name != "" {
-			name = entry.name
+		// 連携済みなら Discord ID のメンション、未連携なら username をそのまま出す
+		if entry, ok := info[username]; ok && entry.discordID != "" {
+			return "<@" + entry.discordID + ">"
 		}
-		var parts []string
-		if ok && entry.discordID != "" {
-			parts = append(parts, "<@"+entry.discordID+">")
-		}
-		if name != username {
-			parts = append(parts, name)
-		}
-		parts = append(parts, "`"+username+"`")
-		if !(ok && entry.discordID != "") {
-			parts = append(parts, "未連携")
-		}
-		return strings.Join(parts, " ")
+		return "`" + username + "`"
 	}
 	lines := make([]string, 0, len(connected))
 	for _, row := range connected {
@@ -309,6 +262,10 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 		}
 	}
 	// メンションは表示にだけ使い、通知は飛ばさない
+	// Authentik から連携状況を取れなかったときはその旨を出す (メンションが省略される)
+	if infoErr != nil {
+		text += "\n⚠️ Authentik から連携状況を取得できませんでした: " + errReason(infoErr)
+	}
 	followEphemeral(s, i, &discordgo.WebhookParams{
 		Content:         text,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},

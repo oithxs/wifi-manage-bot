@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -16,8 +15,6 @@ type config struct {
 	tokenPrefix    string
 	certHelper     string
 	issuedDir      string
-	serialDir      string
-	certDays       int
 	ssid           string
 	verifyName     string
 	botToken       string
@@ -57,10 +54,6 @@ func loadConfig() (*config, error) {
 		certHelper: envOr("WIFI_CERT_HELPER", "/usr/local/sbin/wifi-cert-issue"),
 		// helper が発行した p12 を置くディレクトリ (Bot が読み取って消す)
 		issuedDir: envOr("WIFI_CERT_ISSUED_DIR", "/opt/wifi-bot/issued"),
-		// 現在有効な証明書の serial 記録 (/show で読む。helper と FreeRADIUS と共有)
-		serialDir: envOr("WIFI_SERIAL_DIR", "/var/lib/wifi-certs"),
-		// 証明書の有効日数 (/show の有効期限の表示。helper と同じ値を .env で共有する)
-		certDays: envInt("WIFI_CERT_DAYS", 365),
 		// .mobileconfig (Apple 端末用プロファイル) の Wi-Fi 設定。SSID と RADIUS サーバー証明書の検証名
 		ssid:       envOr("WIFI_SSID", "HxS-AirLAN"),
 		verifyName: envOr("WIFI_RADIUS_VERIFY_NAME", "radius.h-x-s.dev"),
@@ -71,15 +64,6 @@ func loadConfig() (*config, error) {
 func envOr(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
-	}
-	return fallback
-}
-
-func envInt(key string, fallback int) int {
-	if value := os.Getenv(key); value != "" {
-		if n, err := strconv.Atoi(value); err == nil && n > 0 {
-			return n
-		}
 	}
 	return fallback
 }

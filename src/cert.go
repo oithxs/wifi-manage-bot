@@ -8,10 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -154,67 +152,4 @@ func readFileOnce(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	os.Remove(path)
 	return data, err
-}
-
-// issuedCert は現在有効な証明書 1 枚分 (/show 用)。実体 (p12) は Bot が送信時に
-// 削除するため残っておらず、残っているのは helper が書いた serial の記録だけ。
-// 発行日時は serial ファイルの更新時刻、有効期限はそこに WIFI_CERT_DAYS を足した目安。
-type issuedCert struct {
-	Channel   string
-	Serial    string
-	IssuedAt  time.Time
-	ExpiresAt time.Time
-	Legacy    bool // 旧形式 (単一の serial ファイル。p12 チャネルの旧証明書)
-}
-
-func issuedCertificates(cfg *config, username string) ([]issuedCert, error) {
-	dir := filepath.Join(cfg.serialDir, username)
-	var certs []issuedCert
-	for _, channel := range []string{"mobileconfig", "p12"} {
-		path := filepath.Join(dir, "serial."+channel)
-		data, mtime, err := readSerialFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if data == "" {
-			continue
-		}
-		certs = append(certs, issuedCert{
-			Channel:   channel,
-			Serial:    data,
-			IssuedAt:  mtime,
-			ExpiresAt: mtime.AddDate(0, 0, cfg.certDays),
-		})
-	}
-	// 旧形式 (mobileconfig 配布開始以前) の serial ファイル。helper は p12 発行時に
-	// 削除するので、残っている場合は「旧い p12 の証明書」が有効なままということ
-	data, mtime, err := readSerialFile(filepath.Join(dir, "serial"))
-	if err != nil {
-		return nil, err
-	}
-	if data != "" {
-		certs = append(certs, issuedCert{
-			Channel:   "p12",
-			Serial:    data,
-			IssuedAt:  mtime,
-			ExpiresAt: mtime.AddDate(0, 0, cfg.certDays),
-			Legacy:    true,
-		})
-	}
-	return certs, nil
-}
-
-func readSerialFile(path string) (string, time.Time, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", time.Time{}, nil
-	}
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	return strings.TrimSpace(string(data)), info.ModTime(), nil
 }

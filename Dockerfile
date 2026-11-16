@@ -9,7 +9,7 @@ WORKDIR /src
 COPY ./src/go.mod ./src/go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/wifi-bot .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/wifi-manage-bot .
 
 FROM debian:bookworm-slim
 

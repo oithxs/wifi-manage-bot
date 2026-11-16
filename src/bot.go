@@ -15,13 +15,12 @@ import (
 // 1 つの端末だけの再発行は他の端末の証明書に影響しない
 var deviceChannels = map[string][]string{
 	"Apple 端末 (iPhone / iPad / Mac)": {"mobileconfig"},
-	"Android / Windows など":           {"p12"},
+	"Android / Windows / Linux":      {"p12"},
 	"両方 (全端末で入れ直す)":                  {"mobileconfig", "p12"},
 }
 
-var defaultDevice = "Apple 端末 (iPhone / iPad / Mac)"
-
-var defaultChannels = deviceChannels[defaultDevice]
+// 全チャネル (/issue が発行する組合せ。どの端末にも正しいファイルが含まれる)
+var allChannels = []string{"mobileconfig", "p12"}
 
 func deviceLabel(channels []string) string {
 	switch {
@@ -43,7 +42,7 @@ func deviceOption(description string) *discordgo.ApplicationCommandOption {
 		Type:        discordgo.ApplicationCommandOptionString,
 		Name:        "device",
 		Description: description,
-		Required:    false,
+		Required:    true,
 		Choices:     choices,
 	}
 }
@@ -61,9 +60,6 @@ var commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "issue",
 		Description: "Wi-Fi クライアント証明書を新しく発行して送る (本人にしか見えない)",
-		Options: []*discordgo.ApplicationCommandOption{
-			deviceOption("証明書を使う端末。有効期限が切れたときは /reissue でその端末だけ選べば、他の端末の証明書は無効になりません"),
-		},
 	},
 	{
 		Name:        "reissue",

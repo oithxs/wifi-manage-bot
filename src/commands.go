@@ -47,37 +47,35 @@ func (b *bot) handleConnect(s *discordgo.Session, i *discordgo.InteractionCreate
 
 func (b *bot) handleIssue(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	deferEphemeral(s, i)
-	channels, device := deviceFromOptions(i)
-	b.issueCertificates(s, i, channels, device, false)
+	// device オプションは廃止。mobileconfig と p12 の両方を発行するので、
+	// どの端末にも正しいファイルが含まれる
+	b.issueCertificates(s, i, allChannels, false)
 }
 
 func (b *bot) handleReissue(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	deferEphemeral(s, i)
-	channels, device := deviceFromOptions(i)
-	b.issueCertificates(s, i, channels, device, true)
+	channels := channelsFromOptions(i)
+	b.issueCertificates(s, i, channels, true)
 }
 
-func deviceFromOptions(i *discordgo.InteractionCreate) (channels []string, device string) {
-	device = defaultDevice
+func channelsFromOptions(i *discordgo.InteractionCreate) []string {
 	for _, option := range i.ApplicationCommandData().Options {
 		if option.Name == "device" {
-			device = option.StringValue()
+			if channels, ok := deviceChannels[option.StringValue()]; ok {
+				return channels
+			}
 		}
 	}
-	channels, ok := deviceChannels[device]
-	if !ok {
-		// choices があるので通常ここには来ない
-		channels = defaultChannels
-		device = defaultDevice
-	}
-	return channels, device
+	// device は必須で choices に絞られているので、通常ここには来ない
+	return allChannels
 }
 
 // issueCertificates は証明書を発行 (再発行) して、再発行ボタンつきの ephemeral
 // メッセージで送る。reissue が true のときは「以前の証明書は破棄されました」の説明を添える。
 // helper は再発行のたびに serial を上書きするので、そのチャネルの古い証明書は
 // FreeRADIUS 側で失効する (破棄される)
-func (b *bot) issueCertificates(s *discordgo.Session, i *discordgo.InteractionCreate, channels []string, device string, reissue bool) {
+func (b *bot) issueCertificates(s *discordgo.Session, i *discordgo.InteractionCreate, channels []string, reissue bool) {
+	device := deviceLabel(channels)
 	username, ok := b.authorize(s, i)
 	if !ok {
 		return
@@ -182,7 +180,7 @@ func (b *bot) onReissueButton(s *discordgo.Session, i *discordgo.InteractionCrea
 	}
 	// ボタンは ephemeral メッセージのものなので実行者本人にしか押せないが、
 	// 連携・部員状態はコマンドと同じゲートで改めて確認する
-	b.issueCertificates(s, i, valid, deviceLabel(valid), true)
+	b.issueCertificates(s, i, valid, true)
 	b.markReissued(s, i, customID)
 }
 

@@ -34,14 +34,23 @@ func accessLogData(db *sql.DB) ([]sessionRow, *sessionRow, error) {
 	// Accounting-Off でその NAS のセッションをすべて閉じるため、
 	// acctstoptime が NULL ままのセッションが「接続中」を表す。
 	// ただし Stop を取りこぼしたセッションは NULL のまま残るので、
-	// Interim-Update の更新がないものは除外する。
+	// 表示対象は Interim-Update が続いている (生きている) 部員に限定し、
+	// 起点の時刻は同じ部員の固まったセッション (当日分) も含めた最も早い
+	// 開始時刻にする (最初に接続した端末が消えても起点を維持するため)。
 	// 時刻は FreeRADIUS が書き込む Unix エポック (整数)。
+	liveCutoff := time.Now().Unix() - staleAfter
+	// 当日の 0 時 (JST)。日をまたいだ固まった古いセッションを起点にしないための界限
+	now := time.Now().In(jst)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, jst).Unix()
 	rows, err := db.Query(
 		"SELECT username, MIN(acctstarttime) FROM radacct"+
 			" WHERE acctstoptime IS NULL"+
-			" AND COALESCE(acctupdatetime, acctstarttime) > ?"+
+			" AND (acctstarttime >= ? OR COALESCE(acctupdatetime, acctstarttime) > ?)"+
+			" AND username IN (SELECT username FROM radacct"+
+			" WHERE acctstoptime IS NULL"+
+			" AND COALESCE(acctupdatetime, acctstarttime) > ?)"+
 			" GROUP BY username ORDER BY username",
-		time.Now().Unix()-staleAfter)
+		dayStart, liveCutoff, liveCutoff)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -254,7 +255,13 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 	}
 	if last != nil {
 		if last.stopped == nil {
-			text += fmt.Sprintf("\n\n最後の利用: %s — %s から接続中", who(last.username), fmtTime(last.started))
+			// 取りこぼした Stop のセッションは接続中と表示しない
+			if updated, ok := toEpoch(last.updated); ok && time.Since(updated) > staleAfter {
+				text += fmt.Sprintf("\n\n最後の利用: %s — %s 〜 %s (以後応答なし)",
+					who(last.username), fmtTime(last.started), fmtTime(last.updated))
+			} else {
+				text += fmt.Sprintf("\n\n最後の利用: %s — %s から接続中", who(last.username), fmtTime(last.started))
+			}
 		} else {
 			text += fmt.Sprintf("\n\n最後の利用: %s — %s 〜 %s", who(last.username), fmtTime(last.started), fmtTime(last.stopped))
 		}

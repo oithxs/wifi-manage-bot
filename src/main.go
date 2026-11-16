@@ -3,6 +3,7 @@
 // FreeRADIUS が SQLite に書き込むアカウントリング (radius.go) を読み、
 //
 //   - /access-log: acctstoptime が NULL (切断されていない) セッションの部員一覧。
+//     ただし Interim-Update が止まった固まったセッションは切断扱いにする (radius.go)。
 //     連携済みの部員は Discord のメンションで表示し、未連携の部員は username で表示する。
 //     各部員の接続開始時刻と、最後の利用 (誰が・いつから〜いつ) も出す
 //   - /wifi-cert: 実行者の Wi-Fi クライアント証明書を発行して送る。

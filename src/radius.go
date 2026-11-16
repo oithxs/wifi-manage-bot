@@ -19,17 +19,29 @@ type sessionRow struct {
 	username string
 	started  any
 	stopped  any
+	updated  any
 }
+
+// hostapd は既定で 300 秒間隔の Accounting-Interim-Update を送る
+// (radacct の acctupdatetime が進み続ける)。端末が電源オフ・圏外等で
+// Stop を送れずに消えると、acctstoptime が NULL のまま固まるので、
+// 更新が 3 間隔 (900 秒) ないセッションは切断されたものとみなす
+const acctInterimInterval = 300
+const staleAfter = 3 * acctInterimInterval
 
 func accessLogData(db *sql.DB) ([]sessionRow, *sessionRow, error) {
 	// AP (hostapd) は端末が切断するときに Stop を送り、AP の再起動時は
 	// Accounting-Off でその NAS のセッションをすべて閉じるため、
 	// acctstoptime が NULL ままのセッションが「接続中」を表す。
+	// ただし Stop を取りこぼしたセッションは NULL のまま残るので、
+	// Interim-Update の更新がないものは除外する。
 	// 時刻は FreeRADIUS が書き込む Unix エポック (整数)。
 	rows, err := db.Query(
-		"SELECT username, MIN(acctstarttime) FROM radacct" +
-			" WHERE acctstoptime IS NULL" +
-			" GROUP BY username ORDER BY username")
+		"SELECT username, MIN(acctstarttime) FROM radacct"+
+			" WHERE acctstoptime IS NULL"+
+			" AND COALESCE(acctupdatetime, acctstarttime) > ?"+
+			" GROUP BY username ORDER BY username",
+		time.Now().Unix()-staleAfter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -48,10 +60,10 @@ func accessLogData(db *sql.DB) ([]sessionRow, *sessionRow, error) {
 	}
 	var last *sessionRow
 	row := db.QueryRow(
-		"SELECT username, acctstarttime, acctstoptime FROM radacct" +
+		"SELECT username, acctstarttime, acctstoptime, acctupdatetime FROM radacct" +
 			" ORDER BY acctstarttime DESC LIMIT 1")
 	var rowLast sessionRow
-	if err := row.Scan(&rowLast.username, &rowLast.started, &rowLast.stopped); err == nil {
+	if err := row.Scan(&rowLast.username, &rowLast.started, &rowLast.stopped, &rowLast.updated); err == nil {
 		last = &rowLast
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, err

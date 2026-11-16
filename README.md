@@ -1,4 +1,4 @@
-# wifi-bot
+# wifi-manage-bot
 
 部室 Wi-Fi (802.1X / EAP-TLS) の Discord Bot。次のスラッシュコマンドを提供する:
 
@@ -19,17 +19,17 @@
 ## 構成
 
 ```
-main.go            エントリポイント (Bot 本体は Go + discordgo)
-bot.go             スラッシュコマンドと Discord イベントハンドラ
-radius.go          アカウントリング (FreeRADIUS の SQLite) の読み取り
-authentik.go       Authentik API クライアント (発行の認可)
-cert.go            証明書の発行 (root helper の呼び出しと .mobileconfig 生成)
-config.go          環境変数の読み込み
-go.mod / go.sum    Go 依存 (モジュール: github.com/oithxs/wifi-manage-bot)
-wifi-cert-issue    証明書発行 helper (root 専用、設定は環境変数)
-Dockerfile         コンテナイメージ (golang でビルド + debian:bookworm-slim で実行)
-compose.yml        実行環境 (FreeRADIUS 機上で動かす)
-.env.example       環境変数のひな形 (.env にコピーして使う。秘密なのでコミットしない)
+src/main.go         エントリポイント (Bot 本体は Go + discordgo)
+src/bot.go          スラッシュコマンドの定義と Discord イベントハンドラ
+src/radius.go       アカウントリング (FreeRADIUS の SQLite) の読み取り
+src/authentik.go    Authentik API クライアント (発行の認可)
+src/cert.go         証明書の発行 (root helper の呼び出しと .mobileconfig 生成)
+src/config.go       環境変数の読み込み
+src/go.mod / go.sum Go 依存 (モジュール: github.com/oithxs/wifi-manage-bot)
+wifi-cert-issue     証明書発行 helper (root 専用、設定は環境変数)
+Dockerfile          コンテナイメージ (golang でビルド + debian:bookworm-slim で実行)
+compose.yml         実行環境 (FreeRADIUS 機上で動かす)
+.env.example        環境変数のひな形 (.env にコピーして使う。秘密なのでコミットしない)
 ```
 
 ディレクトリは自己完結している (上位の ansible role などへの参照がない)。
@@ -47,17 +47,17 @@ iac 側 (`ansible/roles/radius`) は `radius_bot_repo_dir` 変数でこのディ
    | `WIFI_RADIUS_DB_HOST` | アカウントリング DB (読み取り専用) | `/var/lib/freeradius/radius.sqlite` |
    | `WIFI_CA_DIR_HOST` | 部員証明書に署名するローカル CA | `/etc/freeradius/3.0/certs` |
    | `WIFI_SERIAL_DIR_HOST` | 証明書の serial 記録 (FreeRADIUS 側の照合と共有) | `/var/lib/wifi-certs` |
-   | `WIFI_ISSUED_DIR_HOST` | 発行した p12 の受け渡し場所 | `/opt/wifi-bot/issued` |
-   | `WIFI_BOT_UID` / `WIFI_BOT_GID` | コンテナの実行ユーザー (ホストの `wifi-bot` に合わせる) | `999` / `999` |
+   | `WIFI_ISSUED_DIR_HOST` | 発行した p12 の受け渡し場所 | `/opt/wifi-manage-bot/issued` |
+   | `WIFI_BOT_UID` / `WIFI_BOT_GID` | コンテナの実行ユーザー (ホストの `wifi-manage-bot` に合わせる) | `999` / `999` |
    | `FREERAD_GID` | DB を読むための補助グループ | `104` |
 
-   uid/gid は `id -u wifi-bot`、`getent group freerad` で確認する。
+   uid/gid は `id -u wifi-manage-bot`、`getent group freerad` で確認する。
 
 2. 起動:
 
    ```sh
    docker compose up -d --build
-   docker compose logs -f wifi-bot
+   docker compose logs -f wifi-manage-bot
    ```
 
 3. 停止・更新:
@@ -82,12 +82,14 @@ docker compose up --build
 Go ツールチェーンがあれば直接ビルド・実行もできる:
 
 ```sh
-go build -o wifi-bot .   # 静的バイナリ (CGO 不要)
-./wifi-bot               # WIFI_* 環境変数 (.env は読まないので手動で export する)
+cd src && go build -o ../wifi-manage-bot .   # 静的バイナリ (CGO 不要)
+../wifi-manage-bot                           # WIFI_* 環境変数 (.env は読まないので手動で export する)
 ```
 
-Bot の登録コマンド (`/wifi-cert`, `/access-log`) はギルド限定で起動直後 (Ready) に
-同期する。トークンを替えて再起動すれば反映される。
+Bot の登録コマンド (`/connect`, `/issue`, `/reissue`, `/access-log`) はギルド限定で
+起動直後 (Ready) に同期する。トークンを替えて再起動すれば反映される。
+旧バージョンで登録されていたコマンド (Python 版の `/wifi-cert` 等) は
+起動時に自動で削除する (bot.go の `deleteStaleCommands`)。
 
 ## 設計メモ
 
@@ -98,7 +100,7 @@ Bot の登録コマンド (`/wifi-cert`, `/access-log`) はギルド限定で起
 - **helper の権限**: CA 秘密鍵は root のみが読めるので、Bot (非 root) は
   `sudo -n` で helper を呼ぶ。sudo は既定で環境変数をリセットするため、sudoers に
   `Defaults env_keep += "WIFI_*"` を入れて設定を通している。sudoers は
-  Dockerfile でコンテナ内に置き (`/etc/sudoers.d/wifi-bot-certs`)、ホスト側の
+  Dockerfile でコンテナ内に置き (`/etc/sudoers.d/wifi-manage-bot-certs`)、ホスト側の
   sudoers は不要
 - **CA への書き込みなし**: CA ディレクトリは読み取り専用でマウントする
   (`ca.key` をコンテナから書き換えられないようにするため)。openssl の serial

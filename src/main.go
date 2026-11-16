@@ -1,4 +1,4 @@
-// Wi-Fi の接続状況の確認と証明書の発行を行う Discord Bot (wifi-bot リポジトリ)。
+// Wi-Fi の接続状況の確認と証明書の発行を行う Discord Bot (wifi-manage-bot リポジトリ)。
 //
 // FreeRADIUS が SQLite に書き込むアカウントリング (radius.go) を読み、
 //
@@ -31,7 +31,7 @@ import (
 )
 
 func main() {
-	log.SetPrefix("wifi-bot: ")
+	log.SetPrefix("wifi-manage-bot: ")
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatal(err)

@@ -1,20 +1,20 @@
-# Wi-Fi Discord Bot (wifi-bot)。FreeRADIUS 機上で動かす。
+# Wi-Fi Discord Bot (wifi-manage-bot)。FreeRADIUS 機上で動かす。
 #
 # ボリュームのホスト側パスと uid/gid は .env で渡す (iac の roles/radius が生成する、
 # または手動デプロイのときは .env.example を参考に書く)。
 # コンテナ内のパスは環境変数 (WIFI_* / environment) で固定している。
 services:
-  wifi-bot:
+  wifi-manage-bot:
     build:
       context: .
       args:
-        # ホストの wifi-bot ユーザーと同じ uid/gid でコンテナ内にもユーザーを作る
+        # ホストの wifi-manage-bot ユーザーと同じ uid/gid でコンテナ内にもユーザーを作る
         WIFI_BOT_UID: ${WIFI_BOT_UID}
         WIFI_BOT_GID: ${WIFI_BOT_GID}
-    image: wifi-bot:latest
-    container_name: wifi-bot
+    image: wifi-manage-bot:latest
+    container_name: wifi-manage-bot
     restart: unless-stopped
-    # ホストの wifi-bot ユーザーとして動く (bind mount の所有権を揃えるため)
+    # ホストの wifi-manage-bot ユーザーとして動く (bind mount の所有権を揃えるため)
     user: "${WIFI_BOT_UID:?}:${WIFI_BOT_GID:?}"
     # アカウントリング DB (freerad:freerad) を読めるようにするための補助グループ
     group_add:
@@ -26,11 +26,11 @@ services:
       WIFI_CERT_HELPER: /usr/local/sbin/wifi-cert-issue
       WIFI_CA_DIR: /etc/freeradius/certs
       # helper (wifi-cert-issue) の出力先。Bot 側の WIFI_CERT_ISSUED_DIR と
-      # ボリュームのマウント先 (/var/lib/wifi-bot/issued) に揃える
-      WIFI_ISSUED_DIR: /var/lib/wifi-bot/issued
-      WIFI_CERT_ISSUED_DIR: /var/lib/wifi-bot/issued
+      # ボリュームのマウント先 (/var/lib/wifi-manage-bot/issued) に揃える
+      WIFI_ISSUED_DIR: /var/lib/wifi-manage-bot/issued
+      WIFI_CERT_ISSUED_DIR: /var/lib/wifi-manage-bot/issued
       WIFI_SERIAL_DIR: /var/lib/wifi-certs
-      # helper が p12 を chown する先 (コンテナの wifi-bot ユーザー)
+      # helper が p12 を chown する先 (コンテナの wifi-manage-bot ユーザー)
       WIFI_ISSUE_UID: "${WIFI_BOT_UID:?}"
       WIFI_ISSUE_GID: "${WIFI_BOT_GID:?}"
     volumes:
@@ -41,7 +41,7 @@ services:
       # 証明書の serial 記録 (FreeRADIUS 側の wifi-cert-check が読むのでホストと共有)
       - "${WIFI_SERIAL_DIR_HOST:?}:/var/lib/wifi-certs"
       # 発行した p12 の受け渡し場所 (helper が書き、Bot が読んで消す)
-      - "${WIFI_ISSUED_DIR_HOST:?}:/var/lib/wifi-bot/issued"
+      - "${WIFI_ISSUED_DIR_HOST:?}:/var/lib/wifi-manage-bot/issued"
     logging:
       driver: json-file
       options:

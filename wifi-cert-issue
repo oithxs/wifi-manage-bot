@@ -1,5 +1,5 @@
 #!/bin/sh
-# Wi-Fi クライアント証明書の発行 (root 専用)。wifi-bot が sudo -n で呼び出す。
+# Wi-Fi クライアント証明書の発行 (root 専用)。wifi-manage-bot が sudo -n で呼び出す。
 # CA 秘密鍵は root (コンテナ内ではコンテナの root) のみが読める。
 # 誰に発行してよいか (Discord 連携済み + 部員トークン) の判定は Bot 側 (Authentik) で行う。
 # 1 回の呼び出しで 2 つのチャネル (mobileconfig = Apple 端末用プロファイル / p12 = それ以外)
@@ -19,7 +19,7 @@ set -eu
 umask 077
 
 CA_DIR="${WIFI_CA_DIR:-/etc/freeradius/3.0/certs}"
-OUT_DIR="${WIFI_ISSUED_DIR:-/opt/wifi-bot/issued}"
+OUT_DIR="${WIFI_ISSUED_DIR:-/opt/wifi-manage-bot/issued}"
 ISSUE_UID="${WIFI_ISSUE_UID:-999}"
 ISSUE_GID="${WIFI_ISSUE_GID:-999}"
 DAYS="${WIFI_CERT_DAYS:-365}"

@@ -6,9 +6,9 @@
 # build 時に ARG で固定する (compose.yml の .env から渡す)
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
-COPY ./src/go.mod ./src/go.sum ./
+COPY src/go.mod src/go.sum ./
 RUN go mod download
-COPY . .
+COPY src/ .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/wifi-manage-bot .
 
 FROM debian:bookworm-slim
@@ -36,7 +36,7 @@ RUN chmod 0755 /usr/local/sbin/wifi-cert-issue \
         >> /etc/sudoers.d/wifi-bot-certs \
     && chmod 0440 /etc/sudoers.d/wifi-bot-certs
 
-COPY --from=build /out/wifi-bot /usr/local/bin/wifi-bot
+COPY --from=build /out/wifi-manage-bot /usr/local/bin/wifi-bot
 
 USER wifi-bot
 WORKDIR /opt/wifi-bot

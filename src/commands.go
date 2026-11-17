@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -72,18 +71,15 @@ func (b *bot) handleWifi(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	deferEphemeral(s, i)
-	connected, last, err := accessLogData(b.db)
+	connected, err := accessLogData(b.db)
 	if err != nil {
 		b.followError(s, i, "アカウントリング DB を読めませんでした: "+err.Error())
 		return
 	}
 	// 連携状況 (username → Discord ID) を取る。Authentik が落ちても username だけは出す
-	usernames := make([]string, 0, len(connected)+1)
+	usernames := make([]string, 0, len(connected))
 	for _, row := range connected {
 		usernames = append(usernames, row.username)
-	}
-	if last != nil && !contains(usernames, last.username) {
-		usernames = append(usernames, last.username)
 	}
 	info := map[string]userInfoEntry{}
 	var infoErr error
@@ -109,19 +105,6 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 	if len(lines) > 0 {
 		text = fmt.Sprintf("Wi-Fi に接続中 (%d 名):\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if last != nil {
-		if last.stopped == nil {
-			// 取りこぼした Stop のセッションは接続中と表示しない
-			if updated, ok := toEpoch(last.updated); ok && time.Since(updated) > staleAfter {
-				text += fmt.Sprintf("\n\n最後の利用: %s — %s 〜 %s (以後応答なし)",
-					who(last.username), fmtTime(last.started), fmtTime(last.updated))
-			} else {
-				text += fmt.Sprintf("\n\n最後の利用: %s — %s から接続中", who(last.username), fmtTime(last.started))
-			}
-		} else {
-			text += fmt.Sprintf("\n\n最後の利用: %s — %s 〜 %s", who(last.username), fmtTime(last.started), fmtTime(last.stopped))
-		}
-	}
 	// メンションは表示にだけ使い、通知は飛ばさない
 	// Authentik から連携状況を取れなかったときはその旨を出す (メンションが省略される)
 	if infoErr != nil {
@@ -131,13 +114,4 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 		Content:         text,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},
 	})
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }

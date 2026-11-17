@@ -5,7 +5,7 @@
 - **`/connect`**: Authentik との Discord 連携状況を確認し、未連携なら連携ボタンを出す
 - **`/wifi`**: Wi-Fi の接続情報 (ID = Authentik の username、パスワード = 部員トークン
   `wifi-<username>` の key) を表示する。メッセージは**実行者にしか見えない** (ephemeral)
-- **`/access-log`**: 現在 Wi-Fi に接続している部員の一覧と、最後の利用。FreeRADIUS が
+- **`/access-log`**: 現在 Wi-Fi に接続している部員の一覧。FreeRADIUS が
   SQLite に書くアカウントリング (Accounting) を読む
 
 表示の認可は Authentik で行う (Discord 連携済み + 部員トークン `wifi-<username>`

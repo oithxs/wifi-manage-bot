@@ -3,7 +3,6 @@ package main
 
 import (
 	"database/sql"
-	"errors"
 	"strconv"
 	"time"
 )
@@ -18,8 +17,6 @@ func openDB(path string) (*sql.DB, error) {
 type sessionRow struct {
 	username string
 	started  any
-	stopped  any
-	updated  any
 }
 
 // hostapd は既定で 300 秒間隔の Accounting-Interim-Update を送る
@@ -29,7 +26,7 @@ type sessionRow struct {
 const acctInterimInterval = 300
 const staleAfter = 3 * acctInterimInterval
 
-func accessLogData(db *sql.DB) ([]sessionRow, *sessionRow, error) {
+func accessLogData(db *sql.DB) ([]sessionRow, error) {
 	// AP (hostapd) は端末が切断するときに Stop を送り、AP の再起動時は
 	// Accounting-Off でその NAS のセッションをすべて閉じるため、
 	// acctstoptime が NULL ままのセッションが「接続中」を表す。
@@ -52,7 +49,7 @@ func accessLogData(db *sql.DB) ([]sessionRow, *sessionRow, error) {
 			" GROUP BY username ORDER BY username",
 		dayStart, liveCutoff, liveCutoff)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer rows.Close()
 	// 同じ部員のセッションが複数開いていても、最初に接続した時刻を出す
@@ -60,24 +57,14 @@ func accessLogData(db *sql.DB) ([]sessionRow, *sessionRow, error) {
 	for rows.Next() {
 		var row sessionRow
 		if err := rows.Scan(&row.username, &row.started); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		connected = append(connected, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	var last *sessionRow
-	row := db.QueryRow(
-		"SELECT username, acctstarttime, acctstoptime, acctupdatetime FROM radacct" +
-			" ORDER BY acctstarttime DESC LIMIT 1")
-	var rowLast sessionRow
-	if err := row.Scan(&rowLast.username, &rowLast.started, &rowLast.stopped, &rowLast.updated); err == nil {
-		last = &rowLast
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, err
-	}
-	return connected, last, nil
+	return connected, nil
 }
 
 func toEpoch(value any) (time.Time, bool) {

@@ -13,10 +13,7 @@ type config struct {
 	authentikToken string
 	sourceSlug     string
 	tokenPrefix    string
-	certHelper     string
-	issuedDir      string
 	ssid           string
-	verifyName     string
 	botToken       string
 }
 
@@ -50,14 +47,9 @@ func loadConfig() (*config, error) {
 		sourceSlug:     envOr("WIFI_AUTHENTIK_SOURCE_SLUG", "discord"),
 		// 部員トークン (wifi-<username>) の名前の prefix (FreeRADIUS 側の部員管理と一致させる)
 		tokenPrefix: envOr("WIFI_TOKEN_PREFIX", "wifi-"),
-		// クライアント証明書の発行 helper (/wifi-cert)。root のみが読める CA 秘密鍵で署名する
-		certHelper: envOr("WIFI_CERT_HELPER", "/usr/local/sbin/wifi-cert-issue"),
-		// helper が発行した p12 を置くディレクトリ (Bot が読み取って消す)
-		issuedDir: envOr("WIFI_CERT_ISSUED_DIR", "/opt/wifi-manage-bot/issued"),
-		// .mobileconfig (Apple 端末用プロファイル) の Wi-Fi 設定。SSID と RADIUS サーバー証明書の検証名
-		ssid:       envOr("WIFI_SSID", "HxS-AirLAN"),
-		verifyName: envOr("WIFI_RADIUS_VERIFY_NAME", "radius.h-x-s.dev"),
-		botToken:   botToken,
+		// /wifi の返信の案内に出す SSID
+		ssid:     envOr("WIFI_SSID", "HxS-AirLAN"),
+		botToken: botToken,
 	}, nil
 }
 

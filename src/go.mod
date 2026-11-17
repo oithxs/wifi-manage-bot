@@ -4,7 +4,6 @@ go 1.26.8
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
-	howett.net/plist v1.0.1
 	modernc.org/sqlite v1.62.0
 )
 

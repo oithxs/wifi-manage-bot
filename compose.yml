@@ -23,25 +23,9 @@ services:
     environment:
       # コンテナ内のパス (ボリュームのマウント先と一致させる)
       WIFI_RADIUS_DB: /var/lib/freeradius/radius.sqlite
-      WIFI_CERT_HELPER: /usr/local/sbin/wifi-cert-issue
-      WIFI_CA_DIR: /etc/freeradius/certs
-      # helper (wifi-cert-issue) の出力先。Bot 側の WIFI_CERT_ISSUED_DIR と
-      # ボリュームのマウント先 (/var/lib/wifi-manage-bot/issued) に揃える
-      WIFI_ISSUED_DIR: /var/lib/wifi-manage-bot/issued
-      WIFI_CERT_ISSUED_DIR: /var/lib/wifi-manage-bot/issued
-      WIFI_SERIAL_DIR: /var/lib/wifi-certs
-      # helper が p12 を chown する先 (コンテナの wifi-manage-bot ユーザー)
-      WIFI_ISSUE_UID: "${WIFI_BOT_UID:?}"
-      WIFI_ISSUE_GID: "${WIFI_BOT_GID:?}"
     volumes:
       # アカウントリング DB (rlm_sql_sqlite が書く)。読み取り専用
       - "${WIFI_RADIUS_DB_HOST:?}:/var/lib/freeradius/radius.sqlite:ro"
-      # 部員証明書に署名するローカル CA (ca.key は root のみ)
-      - "${WIFI_CA_DIR_HOST:?}:/etc/freeradius/certs:ro"
-      # 証明書の serial 記録 (FreeRADIUS 側の wifi-cert-check が読むのでホストと共有)
-      - "${WIFI_SERIAL_DIR_HOST:?}:/var/lib/wifi-certs"
-      # 発行した p12 の受け渡し場所 (helper が書き、Bot が読んで消す)
-      - "${WIFI_ISSUED_DIR_HOST:?}:/var/lib/wifi-manage-bot/issued"
     logging:
       driver: json-file
       options:

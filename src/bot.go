@@ -6,51 +6,9 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
-
-// 端末種別 → 発行するチャネル。チャネルごとに別の証明書・別の失効 (serial) なので、
-// 1 つの端末だけの再発行は他の端末の証明書に影響しない
-var deviceChannels = map[string][]string{
-	"Apple 端末 (iPhone / iPad / Mac)": {"mobileconfig"},
-	"Android / Windows / Linux":      {"p12"},
-	"両方 (全端末で入れ直す)":                  {"mobileconfig", "p12"},
-}
-
-// 全チャネル (/issue が発行する組合せ。どの端末にも正しいファイルが含まれる)
-var allChannels = []string{"mobileconfig", "p12"}
-
-func deviceLabel(channels []string) string {
-	switch {
-	case len(channels) == 1 && channels[0] == "mobileconfig":
-		return "Apple 端末 (iPhone / iPad / Mac)"
-	case len(channels) == 1 && channels[0] == "p12":
-		return "Android / Windows など"
-	default:
-		return "両方 (全端末で入れ直す)"
-	}
-}
-
-func deviceOption(description string) *discordgo.ApplicationCommandOption {
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(deviceChannels))
-	for name := range deviceChannels {
-		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: name, Value: name})
-	}
-	return &discordgo.ApplicationCommandOption{
-		Type:        discordgo.ApplicationCommandOptionString,
-		Name:        "device",
-		Description: description,
-		Required:    true,
-		Choices:     choices,
-	}
-}
-
-// 再発行ボタンの CustomID (クリックされたとき channels を取り出す)
-func reissueCustomID(channels []string) string {
-	return "reissue:" + strings.Join(channels, ",")
-}
 
 var commands = []*discordgo.ApplicationCommand{
 	{
@@ -58,15 +16,8 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "Authentik との Discord 連携状況を確認し、未連携なら連携する",
 	},
 	{
-		Name:        "issue",
-		Description: "Wi-Fi クライアント証明書を新しく発行して送る (本人にしか見えない)",
-	},
-	{
-		Name:        "reissue",
-		Description: "Wi-Fi クライアント証明書を再発行する (以前の証明書は破棄されます)",
-		Options: []*discordgo.ApplicationCommandOption{
-			deviceOption("再発行する証明書の端末。選んだ端末の証明書だけが新しくなり、他の端末の証明書は変わりません"),
-		},
+		Name:        "wifi",
+		Description: "Wi-Fi (HxS-AirLAN) の ID とパスワードを表示する (本人にしか見えない)",
 	},
 	{
 		Name:        "access-log",
@@ -184,16 +135,11 @@ func (b *bot) onInteraction(s *discordgo.Session, i *discordgo.InteractionCreate
 		switch i.ApplicationCommandData().Name {
 		case "connect":
 			b.handleConnect(s, i)
-		case "issue":
-			b.handleIssue(s, i)
-		case "reissue":
-			b.handleReissue(s, i)
+		case "wifi":
+			b.handleWifi(s, i)
 		case "access-log":
 			b.handleAccessLog(s, i)
 		}
-	case discordgo.InteractionMessageComponent:
-		// 証明書メッセージの「再発行」ボタン
-		b.onReissueButton(s, i)
 	}
 }
 
@@ -218,26 +164,27 @@ func (b *bot) linked(s *discordgo.Session, i *discordgo.InteractionCreate) (stri
 	return username, true
 }
 
-// authorize は発行の認可ゲート (Discord 連携済み + 部員トークン wifi-<username>)。
-// 通らなければ理由のメッセージを送って false を返す
-func (b *bot) authorize(s *discordgo.Session, i *discordgo.InteractionCreate) (string, bool) {
+// authorize は Wi-Fi 利用の認可ゲート (Discord 連携済み + 部員トークン wifi-<username>)。
+// 通らなければ理由のメッセージを送って false を返す。password は取得済みの
+// Wi-Fi パスワード (部員トークンの key) をそのまま返す
+func (b *bot) authorize(s *discordgo.Session, i *discordgo.InteractionCreate) (string, string, bool) {
 	username, ok := b.linked(s, i)
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 	password, err := b.authentik.wifiPassword(username)
 	if err != nil {
 		b.followError(s, i, "Authentik に接続できませんでした: "+errReason(err))
-		return "", false
+		return "", "", false
 	}
 	if password == "" {
 		log.Printf("no wifi token: %s (discord id %s) is not a registered member", username, interactionUser(i).ID)
 		b.followError(s, i,
 			"まだ部員登録が済んでいません (Wi-Fi 用トークンがありません)。"+
 				"管理者が roles/radius の play を実行するまでお待ちください。")
-		return "", false
+		return "", "", false
 	}
-	return username, true
+	return username, password, true
 }
 
 func sendConnectPrompt(cfg *config, s *discordgo.Session, i *discordgo.InteractionCreate) {

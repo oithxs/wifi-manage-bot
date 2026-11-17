@@ -1,4 +1,5 @@
-// Wi-Fi の接続状況の確認と証明書の発行を行う Discord Bot (wifi-manage-bot リポジトリ)。
+// Wi-Fi の接続状況の確認と Wi-Fi (PEAP-MSCHAPv2) の接続情報の表示を行う Discord Bot
+// (wifi-manage-bot リポジトリ)。
 //
 // FreeRADIUS が SQLite に書き込むアカウントリング (radius.go) を読み、
 //
@@ -7,12 +8,10 @@
 //     連携済みの部員は Discord のメンションで表示し、未連携の部員は username で表示する。
 //     開始時刻は生きているセッションが 1 つでもあれば、当日の固まったセッションも
 //     含めて最初に接続した時刻を起点にする。最後の利用 (誰が・いつから〜いつ) も出す
-//   - /wifi-cert: 実行者の Wi-Fi クライアント証明書を発行して送る。
-//     Apple 端末 (iOS / macOS / iPadOS) 向けに .mobileconfig (Wi-Fi 設定込みのプロファイル)、
-//     それ以外の OS 向けに従来どおり .p12 とパスワードを添える。
-//     誰に発行してよいかの判定 (Discord 連携済み + 部員トークン) は Authentik で行い
-//     (authentik.go)、署名は root helper (wifi-cert-issue) がローカル CA で行う
-//     (cert.go)。返信は ephemeral
+//   - /wifi: 実行者の Wi-Fi 接続情報 (identity = Authentik の username と
+//     部員トークン wifi-<username> の key = パスワード) を ephemeral で表示する。
+//     誰に表示してよいかの判定 (Discord 連携済み + 部員トークンの存在) は Authentik で行う
+//     (authentik.go)。返信は ephemeral
 //
 // Discord 側の実装は bot.go、設定は config.go。
 package main

@@ -180,10 +180,9 @@ func (c *authentikClient) usernameForDiscord(discordID string) (string, error) {
 }
 
 func (c *authentikClient) wifiPassword(username string) (string, error) {
-	// 部員トークン (wifi-<username>) の存在確認。トークンがあれば部員、なければ空文字
-	//
-	// トークンの key は /wifi の削除後は使わないが、トークンの存在自体が
-	// /wifi-cert の部員判定 (認可ゲート) として必要なので残す
+	// 部員トークン (wifi-<username>) の key = Wi-Fi (PEAP-MSCHAPv2) のパスワード。
+	// roles/radius が users ファイルに書き込む値と同じ。トークンがなければ空文字
+	// (未部員扱い)
 	data, err := c.get("/api/v3/core/tokens/"+c.tokenPrefix+username+"/view_key/", nil)
 	if err != nil {
 		var apiErr *apiError

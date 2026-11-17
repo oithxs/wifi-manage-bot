@@ -57,14 +57,10 @@ func (b *bot) handleWifi(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	content := fmt.Sprintf(
 		"Wi-Fi (`%s`) の接続情報です。**このメッセージはあなたにしか見えません。**\n"+
 			"- ID (identity): `%s`\n"+
-			"- パスワード: `%s`\n\n"+
+			"- パスワード: ||`%s`||\n\n"+
 			"端末の Wi-Fi 設定では WPA2/WPA3-Enterprise、EAP 方式 = **PEAP**、"+
 			"内側の認証 = **MSCHAPv2**、CA 証明書 = 「システム標準 / 指定しない」を選び、"+
-			"上の ID とパスワードを入力してください。\n\n"+
-			"⚠️ 証明書版 (`/issue`) で設定した端末は、古いプロファイル (HxS-AirLAN の "+
-			"クライアント証明書入り) を削除してから設定し直してください。\n\n"+
-			"パスワードを忘れた・漏れた疑いがあるときは管理者に連絡してください "+
-			"(roles/radius の play で再生成して失効できます)。",
+			"上の ID とパスワードを入力してください。\n\n",
 		b.cfg.ssid, username, password)
 	followEphemeral(s, i, &discordgo.WebhookParams{
 		Content:         content,

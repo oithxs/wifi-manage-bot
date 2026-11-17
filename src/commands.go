@@ -58,7 +58,7 @@ func (b *bot) handleWifi(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		"Wi-Fi (`%s`) の接続情報です。**このメッセージはあなたにしか見えません。**\n"+
 			"- ID (identity): `%s`\n"+
 			"- パスワード: ||`%s`||\n\n"+
-			"端末の Wi-Fi 設定では WPA2/WPA3-Enterprise、EAP 方式 = **PEAP**、"+
+			"端末の Wi-Fi 設定では WPA/WPA2-Enterprise、EAP 方式 = **PEAP**、"+
 			"内側の認証 = **MSCHAPv2**、CA 証明書 = 「システム標準 / 指定しない」を選び、"+
 			"上の ID とパスワードを入力してください。\n\n",
 		b.cfg.ssid, username, password)

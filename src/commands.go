@@ -77,14 +77,10 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 		return
 	}
 	// 連携状況 (username → Discord ID) を取る。Authentik が落ちても username だけは出す
-	usernames := make([]string, 0, len(connected))
-	for _, row := range connected {
-		usernames = append(usernames, row.username)
-	}
 	info := map[string]userInfoEntry{}
 	var infoErr error
 	if b.cfg.authentikURL != "" && b.cfg.authentikToken != "" {
-		if entries, err := b.authentik.userInfo(usernames); err == nil {
+		if entries, err := b.authentik.userInfo(connected); err == nil {
 			info = entries
 		} else {
 			infoErr = err
@@ -98,8 +94,8 @@ func (b *bot) handleAccessLog(s *discordgo.Session, i *discordgo.InteractionCrea
 		return "`" + username + "`"
 	}
 	lines := make([]string, 0, len(connected))
-	for _, row := range connected {
-		lines = append(lines, fmt.Sprintf("- %s — %s から", who(row.username), fmtTime(row.started)))
+	for _, username := range connected {
+		lines = append(lines, "- "+who(username))
 	}
 	text := "Wi-Fi に接続している部員はいません。"
 	if len(lines) > 0 {

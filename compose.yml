@@ -16,16 +16,30 @@ services:
     restart: unless-stopped
     # ホストの wifi-manage-bot ユーザーとして動く (bind mount の所有権を揃えるため)
     user: "${WIFI_BOT_UID:?}:${WIFI_BOT_GID:?}"
-    # アカウントリング DB (freerad:freerad) を読めるようにするための補助グループ
+    # アカウントリング DB (freerad:freerad) を読めるようにするための補助グループ。
+    # Wi-Fi トークンの自動発行 (users ファイルの更新) でもこのグループを使う
     group_add:
       - "${FREERAD_GID:?}"
     env_file: .env
     environment:
       # コンテナ内のパス (ボリュームのマウント先と一致させる)
       WIFI_RADIUS_DB: /var/lib/freeradius/radius.sqlite
+      # Bot が Wi-Fi トークンの発行に合わせて書き換える users ファイル
+      WIFI_USERS_FILE: /etc/freeradius/3.0/mods-config/files/authorize
+      # 書き換えた users ファイルに付ける所有グループ (freerad) の gid
+      FREERAD_GID: "${FREERAD_GID:?}"
+    ports:
+      # Authentik の Webhook (Wi-Fi トークンの自動発行のトリガー) を受け取る。
+      # iac の roles/radius が .env で Tailscale の IP を渡す。未設定のときは
+      # ループバックでだけ待ち受ける (部室 LAN には出さない)
+      - "${WIFI_WEBHOOK_BIND:-127.0.0.1}:${WIFI_WEBHOOK_PORT:-8082}:8080"
     volumes:
       # アカウントリング DB (rlm_sql_sqlite が書く)。読み取り専用
       - "${WIFI_RADIUS_DB_HOST:?}:/var/lib/freeradius/radius.sqlite:ro"
+      # users ファイルのディレクトリ (Bot がトークンの発行に合わせて書き換える)。
+      # ファイル単体でマウントすると (原子) 置き換えのあとも古い内容が見え続けるため、
+      # ディレクトリごとマウントする
+      - "${WIFI_USERS_DIR_HOST:-/etc/freeradius/3.0/mods-config/files}:/etc/freeradius/3.0/mods-config/files:rw"
     logging:
       driver: json-file
       options:

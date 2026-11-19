@@ -180,8 +180,8 @@ func (b *bot) authorize(s *discordgo.Session, i *discordgo.InteractionCreate) (s
 	if password == "" {
 		log.Printf("no wifi token: %s (discord id %s) is not a registered member", username, interactionUser(i).ID)
 		b.followError(s, i,
-			"まだ部員登録が済んでいません (Wi-Fi 用トークンがありません)。"+
-				"管理者が roles/radius の play を実行するまでお待ちください。")
+			"まだ Wi-Fi 用トークンがありません。部員登録の反映まで数分待ってから、"+
+				"もう一度コマンドを実行してください。")
 		return "", "", false
 	}
 	return username, password, true

@@ -33,8 +33,7 @@ func (b *bot) handleConnect(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 	content := fmt.Sprintf("Authentik と連携済みです: `%s`\n", username)
 	if password == "" {
-		content += "Wi-Fi 用の部員トークンがありません (部員登録が済んでいません)。" +
-			"管理者が roles/radius の play を実行するまでお待ちください。"
+		content += "Wi-Fi 用の部員トークンがありません (部員登録の反映まで数分待ってください)。"
 	} else {
 		content += "部員登録も済んでいます。`/wifi` で Wi-Fi の接続情報を表示できます。"
 	}

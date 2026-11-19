@@ -13,11 +13,19 @@
 //     誰に表示してよいかの判定 (Discord 連携済み + 部員トークンの存在) は Authentik で行う
 //     (authentik.go)。返信は ephemeral
 //
+// Authentik に追加された部員への Wi-Fi トークンの自動発行 (provision.go) もこの
+// プロセスで行う。起動時・一定間隔・Authentik の Webhook で、部員のトークンと
+// FreeRADIUS の users ファイルを Authentik に合わせて更新する (WIFI_MEMBER_GROUP が
+// 空のときは行わない)。
+//
 // Discord 側の実装は bot.go、設定は config.go。
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -42,6 +50,32 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	authentik := &authentikClient{
+		baseURL:     cfg.authentikURL,
+		token:       cfg.authentikToken,
+		sourceSlug:  cfg.sourceSlug,
+		tokenPrefix: cfg.tokenPrefix,
+	}
+
+	// Wi-Fi 部員のプロビジョニング。Discord とは独立に動かす
+	// (Authentik に届かないあいだは失敗を繰り返して、次の周期で直る)
+	if cfg.memberGroup != "" {
+		provisioner := newProvisioner(cfg, authentik)
+		go provisioner.run(ctx)
+		if cfg.webhookToken != "" {
+			go func() {
+				if err := provisioner.listenAndServe(ctx); err != nil &&
+					!errors.Is(err, http.ErrServerClosed) {
+					log.Printf("webhook server error: %v", err)
+				}
+			}()
+		}
+	}
+
 	dg, err := discordgo.New("Bot " + cfg.botToken)
 	if err != nil {
 		log.Fatal(err)
@@ -49,14 +83,9 @@ func main() {
 	// スラッシュコマンドのみで intents は不要
 	dg.Identify.Intents = discordgo.IntentsNone
 	b := &bot{
-		cfg: cfg,
-		db:  db,
-		authentik: &authentikClient{
-			baseURL:     cfg.authentikURL,
-			token:       cfg.authentikToken,
-			sourceSlug:  cfg.sourceSlug,
-			tokenPrefix: cfg.tokenPrefix,
-		},
+		cfg:       cfg,
+		db:        db,
+		authentik: authentik,
 	}
 	dg.AddHandler(b.onReady)
 	dg.AddHandler(b.onInteraction)
@@ -64,9 +93,7 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("started")
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	<-ctx.Done()
 	log.Println("shutting down")
 	dg.Close()
 }
